@@ -71,6 +71,13 @@
             box-shadow: 0 0 18px rgba(191, 0, 255, 0.26);
         }
 
+        #canvas3d canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+            touch-action: none;
+        }
+
         .canvas-wrapper {
             display: flex;
             justify-content: center;
@@ -148,6 +155,10 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.domElement.style.display = 'block';
+        renderer.domElement.style.width = '100%';
+        renderer.domElement.style.height = '100%';
+        renderer.domElement.style.touchAction = 'none';
         container3d.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
@@ -349,7 +360,8 @@
             const width = Math.max(container3d.clientWidth, 1);
             const height = Math.max(container3d.clientHeight, 1);
             camera.aspect = width / height;
-            renderer.setSize(width, height, false);
+            renderer.setSize(width, height, true);
+            renderer.setViewport(0, 0, width, height);
             frameModel();
         }
 
@@ -630,3 +642,5 @@
     </script>
 </body>
 </html>
+
+
