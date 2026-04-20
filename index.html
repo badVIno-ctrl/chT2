@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Черчение - 3 Вида и 3D с Сечением</title>
+    <title>Черчение - 3 Вида, 3D и Размеры</title>
     <style>
         :root {
             --neon: #bf00ff;
             --bg: #050505;
             --accent: #00ffff;
             --red: #ff3333;
+            --dim: #39ff14; /* Неоновый зеленый для размеров */
         }
 
         * {
@@ -39,13 +40,22 @@
         }
 
         h2 {
-            margin: 0 0 clamp(16px, 2.5vw, 30px);
+            margin: 0 0 clamp(8px, 2.5vw, 15px);
             text-align: center;
             font-size: clamp(14px, 2.1vw, 28px);
             font-weight: 300;
             letter-spacing: clamp(1px, 0.22vw, 2px);
             color: var(--neon);
             text-shadow: 0 0 10px var(--neon), 0 0 20px var(--neon);
+        }
+
+        .hint {
+            text-align: center;
+            color: var(--accent);
+            opacity: 0.8;
+            font-size: clamp(12px, 1.5vw, 15px);
+            margin-bottom: clamp(16px, 2vw, 25px);
+            font-weight: 300;
         }
 
         .glass-panel {
@@ -86,7 +96,7 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        canvas#view2d {
+        canvas.view-canvas {
             display: block;
             width: min(100%, 800px);
             height: auto;
@@ -134,8 +144,17 @@
 
         <div class="glass-panel">
             <h2>2. Ортогональные проекции</h2>
+            <div class="hint">Кликните в любую точку, чтобы увидеть связи</div>
             <div class="canvas-wrapper">
-                <canvas id="view2d" width="800" height="700"></canvas>
+                <canvas id="view2d" class="view-canvas" width="800" height="700"></canvas>
+            </div>
+        </div>
+
+        <div class="glass-panel">
+            <h2>3. Размеры деталей</h2>
+            <div class="hint">Кликните (или тапните) по любой линии, чтобы узнать её длину</div>
+            <div class="canvas-wrapper">
+                <canvas id="view2d-dims" class="view-canvas" width="800" height="700"></canvas>
             </div>
         </div>
     </div>
@@ -247,25 +266,14 @@
             const halfLength = length / 2;
             const halfDepth = depth / 2;
 
-            const p1 = center.clone()
-                .addScaledVector(along, -halfLength)
-                .addScaledVector(across, -halfDepth);
-            const p2 = center.clone()
-                .addScaledVector(along, halfLength)
-                .addScaledVector(across, -halfDepth);
-            const p3 = center.clone()
-                .addScaledVector(along, halfLength)
-                .addScaledVector(across, halfDepth);
-            const p4 = center.clone()
-                .addScaledVector(along, -halfLength)
-                .addScaledVector(across, halfDepth);
+            const p1 = center.clone().addScaledVector(along, -halfLength).addScaledVector(across, -halfDepth);
+            const p2 = center.clone().addScaledVector(along, halfLength).addScaledVector(across, -halfDepth);
+            const p3 = center.clone().addScaledVector(along, halfLength).addScaledVector(across, halfDepth);
+            const p4 = center.clone().addScaledVector(along, -halfLength).addScaledVector(across, halfDepth);
 
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute([
-                p1.x, p1.y, p1.z,
-                p2.x, p2.y, p2.z,
-                p3.x, p3.y, p3.z,
-                p4.x, p4.y, p4.z
+                p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z, p4.x, p4.y, p4.z
             ], 3));
             geometry.setIndex([0, 1, 2, 0, 2, 3]);
             geometry.computeVertexNormals();
@@ -297,10 +305,7 @@
         const sectionDepth = baseSize * Math.SQRT2 + 4;
 
         const { geometry: sectionGeometry, corners: sectionCorners } = createSectionGeometry(
-            sectionCenter,
-            sectionDirection,
-            sectionLength,
-            sectionDepth
+            sectionCenter, sectionDirection, sectionLength, sectionDepth
         );
 
         const sectionMesh = new THREE.Mesh(sectionGeometry, sectionFillMaterial);
@@ -316,11 +321,7 @@
 
         const pointSphere = new THREE.Mesh(
             new THREE.SphereGeometry(3, 20, 20),
-            new THREE.MeshBasicMaterial({
-                color: 0x00ffff,
-                depthWrite: false,
-                depthTest: false
-            })
+            new THREE.MeshBasicMaterial({ color: 0x00ffff, depthWrite: false, depthTest: false })
         );
         pointSphere.renderOrder = 6;
         pointSphere.visible = false;
@@ -377,10 +378,8 @@
         }
         animate();
 
-        // --- СЕКЦИЯ 2: 2D-чертеж и интерактивность ---
-        const canvas = document.getElementById('view2d');
-        const ctx = canvas.getContext('2d');
 
+        // --- ОБЩИЕ ПЕРЕМЕННЫЕ ДЛЯ 2D ЧЕРТЕЖЕЙ ---
         const neonColor = '#bf00ff';
         const axisColor = 'rgba(255, 255, 255, 0.4)';
         const projColor = 'rgba(255, 255, 255, 0.15)';
@@ -407,62 +406,46 @@
         const secY2 = y2 * scale;
         const projDepth = halfBW;
 
-        let activePoint = null;
-
-        function draw2D() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+        // Базовая функция отрисовки геометрии (без интерактива)
+        function drawBaseGeometry(ctx) {
             ctx.beginPath();
             ctx.strokeStyle = axisColor;
             ctx.lineWidth = 1;
             ctx.moveTo(0, cy);
-            ctx.lineTo(canvas.width, cy);
+            ctx.lineTo(ctx.canvas.width, cy);
             ctx.moveTo(cx, 0);
-            ctx.lineTo(cx, canvas.height);
+            ctx.lineTo(cx, ctx.canvas.height);
             ctx.stroke();
 
             ctx.fillStyle = axisColor;
             ctx.font = '14px Arial';
             ctx.fillText('X', 20, cy - 10);
             ctx.fillText('Z', cx + 10, 20);
-            ctx.fillText('Y', cx + 10, canvas.height - 20);
-            ctx.fillText('Y', canvas.width - 20, cy - 10);
+            ctx.fillText('Y', cx + 10, ctx.canvas.height - 20);
+            ctx.fillText('Y', ctx.canvas.width - 20, cy - 10);
 
             ctx.beginPath();
             ctx.strokeStyle = projColor;
             ctx.setLineDash([5, 5]);
-            ctx.moveTo(frontX, baseY);
-            ctx.lineTo(sideX + halfBW + 20, baseY);
-            ctx.moveTo(frontX, baseY - bH);
-            ctx.lineTo(sideX + halfBW + 20, baseY - bH);
-            ctx.moveTo(frontX, baseY - bH - cH);
-            ctx.lineTo(sideX + halfCW + 20, baseY - bH - cH);
-            ctx.moveTo(frontX - halfBW, topY);
-            ctx.lineTo(frontX - halfBW, baseY - bH);
-            ctx.moveTo(frontX + halfBW, topY);
-            ctx.lineTo(frontX + halfBW, baseY - bH);
+            ctx.moveTo(frontX, baseY); ctx.lineTo(sideX + halfBW + 20, baseY);
+            ctx.moveTo(frontX, baseY - bH); ctx.lineTo(sideX + halfBW + 20, baseY - bH);
+            ctx.moveTo(frontX, baseY - bH - cH); ctx.lineTo(sideX + halfCW + 20, baseY - bH - cH);
+            ctx.moveTo(frontX - halfBW, topY); ctx.lineTo(frontX - halfBW, baseY - bH);
+            ctx.moveTo(frontX + halfBW, topY); ctx.lineTo(frontX + halfBW, baseY - bH);
             ctx.arc(cx, cy, 150, 0, Math.PI / 2);
-            ctx.moveTo(cx, cy + 150 + halfBW);
-            ctx.arc(cx, cy, 150 + halfBW, 0, Math.PI / 2);
-            ctx.moveTo(cx, cy + 150 - halfBW);
-            ctx.arc(cx, cy, 150 - halfBW, 0, Math.PI / 2);
-            ctx.moveTo(sideX, cy);
-            ctx.lineTo(sideX, baseY - bH - cH);
-            ctx.moveTo(sideX - halfBW, cy);
-            ctx.lineTo(sideX - halfBW, baseY - bH);
-            ctx.moveTo(sideX + halfBW, cy);
-            ctx.lineTo(sideX + halfBW, baseY - bH);
+            ctx.moveTo(cx, cy + 150 + halfBW); ctx.arc(cx, cy, 150 + halfBW, 0, Math.PI / 2);
+            ctx.moveTo(cx, cy + 150 - halfBW); ctx.arc(cx, cy, 150 - halfBW, 0, Math.PI / 2);
+            ctx.moveTo(sideX, cy); ctx.lineTo(sideX, baseY - bH - cH);
+            ctx.moveTo(sideX - halfBW, cy); ctx.lineTo(sideX - halfBW, baseY - bH);
+            ctx.moveTo(sideX + halfBW, cy); ctx.lineTo(sideX + halfBW, baseY - bH);
             ctx.stroke();
 
             ctx.beginPath();
             ctx.strokeStyle = '#888';
             ctx.setLineDash([15, 5, 2, 5]);
-            ctx.moveTo(frontX, baseY - bH - cH - 20);
-            ctx.lineTo(frontX, topY + halfBW + 20);
-            ctx.moveTo(frontX - halfBW - 20, topY);
-            ctx.lineTo(frontX + halfBW + 20, topY);
-            ctx.moveTo(sideX, baseY - bH - cH - 20);
-            ctx.lineTo(sideX, cy + 20);
+            ctx.moveTo(frontX, baseY - bH - cH - 20); ctx.lineTo(frontX, topY + halfBW + 20);
+            ctx.moveTo(frontX - halfBW - 20, topY); ctx.lineTo(frontX + halfBW + 20, topY);
+            ctx.moveTo(sideX, baseY - bH - cH - 20); ctx.lineTo(sideX, cy + 20);
             ctx.stroke();
             ctx.setLineDash([]);
 
@@ -471,9 +454,11 @@
             ctx.shadowBlur = 10;
             ctx.shadowColor = neonColor;
 
+            // Фронтальный вид
             ctx.strokeRect(frontX - halfBW, baseY - bH, bW, bH);
             ctx.strokeRect(frontX - halfCW, baseY - bH - cH, cW, cH);
 
+            // Вид сверху (Ромб)
             ctx.beginPath();
             ctx.moveTo(frontX, topY - halfBW);
             ctx.lineTo(frontX + halfBW, topY);
@@ -482,20 +467,21 @@
             ctx.closePath();
             ctx.stroke();
 
+            // Круг
             ctx.beginPath();
             ctx.arc(frontX, topY, halfCW, 0, Math.PI * 2);
             ctx.stroke();
 
+            // Вид сбоку
             ctx.strokeRect(sideX - halfBW, baseY - bH, bW, bH);
             ctx.strokeRect(sideX - halfCW, baseY - bH - cH, cW, cH);
             ctx.beginPath();
-            ctx.moveTo(sideX, baseY);
-            ctx.lineTo(sideX, baseY - bH);
-            ctx.moveTo(frontX, baseY);
-            ctx.lineTo(frontX, baseY - bH);
+            ctx.moveTo(sideX, baseY); ctx.lineTo(sideX, baseY - bH);
+            ctx.moveTo(frontX, baseY); ctx.lineTo(frontX, baseY - bH);
             ctx.stroke();
             ctx.shadowBlur = 0;
 
+            // Сечения
             ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
             ctx.strokeStyle = '#ff3333';
             ctx.lineWidth = 2;
@@ -510,6 +496,17 @@
 
             ctx.fillRect(sideX - projDepth, baseY - secY2, projDepth * 2, secY2 - secY1);
             ctx.strokeRect(sideX - projDepth, baseY - secY2, projDepth * 2, secY2 - secY1);
+        }
+
+
+        // --- СЕКЦИЯ 2: Точки связей (Оригинальная логика) ---
+        const canvas2d = document.getElementById('view2d');
+        const ctx2d = canvas2d.getContext('2d');
+        let activePoint = null;
+
+        function drawSection2() {
+            ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
+            drawBaseGeometry(ctx2d);
 
             if (activePoint) {
                 const pxFront = frontX + activePoint.x * scale;
@@ -519,112 +516,68 @@
                 const pxSide = sideX + activePoint.z * scale;
                 const pySide = baseY - activePoint.y * scale;
 
-                ctx.beginPath();
-                ctx.strokeStyle = '#00ffff';
-                ctx.lineWidth = 1;
-                ctx.setLineDash([4, 4]);
-                ctx.moveTo(pxFront, pyFront);
-                ctx.lineTo(pxTop, pyTop);
-                ctx.moveTo(pxFront, pyFront);
-                ctx.lineTo(pxSide, pySide);
-                ctx.moveTo(pxTop, pyTop);
-                ctx.lineTo(cx, pyTop);
+                ctx2d.beginPath();
+                ctx2d.strokeStyle = '#00ffff';
+                ctx2d.lineWidth = 1;
+                ctx2d.setLineDash([4, 4]);
+                ctx2d.moveTo(pxFront, pyFront); ctx2d.lineTo(pxTop, pyTop);
+                ctx2d.moveTo(pxFront, pyFront); ctx2d.lineTo(pxSide, pySide);
+                ctx2d.moveTo(pxTop, pyTop); ctx2d.lineTo(cx, pyTop);
 
                 const arcRadius = pyTop - cy;
                 if (arcRadius > 0) {
-                    ctx.arc(cx, cy, arcRadius, Math.PI / 2, 0, true);
+                    ctx2d.arc(cx, cy, arcRadius, Math.PI / 2, 0, true);
                 } else {
-                    ctx.arc(cx, cy, Math.abs(arcRadius), Math.PI / 2, 0, false);
+                    ctx2d.arc(cx, cy, Math.abs(arcRadius), Math.PI / 2, 0, false);
                 }
 
-                ctx.lineTo(pxSide, pySide);
-                ctx.stroke();
-                ctx.setLineDash([]);
+                ctx2d.lineTo(pxSide, pySide);
+                ctx2d.stroke();
+                ctx2d.setLineDash([]);
 
-                ctx.fillStyle = '#00ffff';
-                ctx.shadowBlur = 12;
-                ctx.shadowColor = '#00ffff';
+                ctx2d.fillStyle = '#00ffff';
+                ctx2d.shadowBlur = 12;
+                ctx2d.shadowColor = '#00ffff';
 
-                const dots = [
-                    [pxFront, pyFront],
-                    [pxTop, pyTop],
-                    [pxSide, pySide]
-                ];
-
-                dots.forEach(([x, y]) => {
-                    ctx.beginPath();
-                    ctx.arc(x, y, 5, 0, Math.PI * 2);
-                    ctx.fill();
+                [ [pxFront, pyFront], [pxTop, pyTop], [pxSide, pySide] ].forEach(([x, y]) => {
+                    ctx2d.beginPath();
+                    ctx2d.arc(x, y, 5, 0, Math.PI * 2);
+                    ctx2d.fill();
                 });
-
-                ctx.shadowBlur = 0;
+                ctx2d.shadowBlur = 0;
             }
         }
 
-        draw2D();
+        drawSection2();
 
-        // --- Обработка кликов для создания проекционных связей ---
-        canvas.addEventListener('click', (event) => {
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = event.clientX - rect.left;
-            const mouseY = event.clientY - rect.top;
+        canvas2d.addEventListener('click', (event) => {
+            const rect = canvas2d.getBoundingClientRect();
+            const mouseX = (event.clientX - rect.left) * (canvas2d.width / rect.width);
+            const mouseY = (event.clientY - rect.top) * (canvas2d.height / rect.height);
 
-            let locX = 0;
-            let locY = 0;
-            let locZ = 0;
-            let found = false;
+            let locX = 0, locY = 0, locZ = 0, found = false;
             const margin = 15;
 
-            if (
-                mouseX > frontX - halfBW - margin &&
-                mouseX < frontX + halfBW + margin &&
-                mouseY > baseY - bH - cH - margin &&
-                mouseY < baseY + margin
-            ) {
+            if (mouseX > frontX - halfBW - margin && mouseX < frontX + halfBW + margin && mouseY > baseY - bH - cH - margin && mouseY < baseY + margin) {
                 locX = (mouseX - frontX) / scale;
                 locY = (baseY - mouseY) / scale;
                 locY = Math.max(0, Math.min(100, locY));
-
-                if (locY > baseHeight) {
-                    locZ = Math.abs(locX) <= cylRadius ? Math.sqrt(cylRadius ** 2 - locX ** 2) : 0;
-                } else {
-                    const maxZ = baseHalfDiagonal;
-                    locZ = Math.abs(locX) <= maxZ ? maxZ - Math.abs(locX) : 0;
-                }
+                if (locY > baseHeight) { locZ = Math.abs(locX) <= cylRadius ? Math.sqrt(cylRadius ** 2 - locX ** 2) : 0; }
+                else { const maxZ = baseHalfDiagonal; locZ = Math.abs(locX) <= maxZ ? maxZ - Math.abs(locX) : 0; }
                 found = true;
-            } else if (
-                mouseX > frontX - halfBW - margin &&
-                mouseX < frontX + halfBW + margin &&
-                mouseY > topY - halfBW - margin &&
-                mouseY < topY + halfBW + margin
-            ) {
+            } else if (mouseX > frontX - halfBW - margin && mouseX < frontX + halfBW + margin && mouseY > topY - halfBW - margin && mouseY < topY + halfBW + margin) {
                 locX = (mouseX - frontX) / scale;
                 locZ = (mouseY - topY) / scale;
-
-                if (locX ** 2 + locZ ** 2 <= cylRadius ** 2) {
-                    locY = baseHeight + cylHeight;
-                } else if (Math.abs(locX) + Math.abs(locZ) <= baseHalfDiagonal) {
-                    locY = baseHeight;
-                } else {
-                    locY = 0;
-                }
+                if (locX ** 2 + locZ ** 2 <= cylRadius ** 2) { locY = baseHeight + cylHeight; }
+                else if (Math.abs(locX) + Math.abs(locZ) <= baseHalfDiagonal) { locY = baseHeight; }
+                else { locY = 0; }
                 found = true;
-            } else if (
-                mouseX > sideX - halfBW - margin &&
-                mouseX < sideX + halfBW + margin &&
-                mouseY > baseY - bH - cH - margin &&
-                mouseY < baseY + margin
-            ) {
+            } else if (mouseX > sideX - halfBW - margin && mouseX < sideX + halfBW + margin && mouseY > baseY - bH - cH - margin && mouseY < baseY + margin) {
                 locZ = (mouseX - sideX) / scale;
                 locY = (baseY - mouseY) / scale;
                 locY = Math.max(0, Math.min(100, locY));
-
-                if (locY > baseHeight) {
-                    locX = Math.abs(locZ) <= cylRadius ? Math.sqrt(cylRadius ** 2 - locZ ** 2) : 0;
-                } else {
-                    const maxX = baseHalfDiagonal;
-                    locX = Math.abs(locZ) <= maxX ? maxX - Math.abs(locZ) : 0;
-                }
+                if (locY > baseHeight) { locX = Math.abs(locZ) <= cylRadius ? Math.sqrt(cylRadius ** 2 - locZ ** 2) : 0; }
+                else { const maxX = baseHalfDiagonal; locX = Math.abs(locZ) <= maxX ? maxX - Math.abs(locZ) : 0; }
                 found = true;
             }
 
@@ -636,11 +589,197 @@
                 activePoint = null;
                 pointSphere.visible = false;
             }
-
-            draw2D();
+            drawSection2();
         });
+
+
+        // --- СЕКЦИЯ 3: Размеры (Новая логика) ---
+        const canvasDims = document.getElementById('view2d-dims');
+        const ctxDims = canvasDims.getContext('2d');
+
+        // Расчет значений размеров из внутренних единиц (10 ед = 1 см)
+        const vBaseDiag = (baseSize * Math.SQRT2 / 10).toFixed(1).replace('.', ','); // 8,5
+        const vBaseSide = (baseSize / 10).toFixed(1).replace('.', ','); // 6,0
+        const vBaseH = (baseHeight / 10).toFixed(1).replace('.', ','); // 3,5
+        const vCylD = (cylRadius * 2 / 10).toFixed(1).replace('.', ','); // 5,0
+        const vCylH = (cylHeight / 10).toFixed(1).replace('.', ','); // 6,5
+
+        // Массив всех интерактивных линий. offset: отступ выносной линии (положительный - наружу/вниз/вправо)
+        const dimLines = [
+            // Фронтальный вид
+            { x1: frontX - halfBW, y1: baseY, x2: frontX + halfBW, y2: baseY, val: vBaseDiag, offset: 25, active: false },
+            { x1: frontX - halfBW, y1: baseY, x2: frontX - halfBW, y2: baseY - bH, val: vBaseH, offset: 25, active: false },
+            { x1: frontX + halfBW, y1: baseY - bH, x2: frontX + halfBW, y2: baseY, val: vBaseH, offset: 25, active: false },
+            { x1: frontX - halfCW, y1: baseY - bH, x2: frontX - halfCW, y2: baseY - bH - cH, val: vCylH, offset: 25, active: false },
+            { x1: frontX + halfCW, y1: baseY - bH - cH, x2: frontX + halfCW, y2: baseY - bH, val: vCylH, offset: 25, active: false },
+            { x1: frontX - halfCW, y1: baseY - bH - cH, x2: frontX + halfCW, y2: baseY - bH - cH, val: vCylD, offset: -25, active: false },
+
+            // Вид сбоку
+            { x1: sideX - halfBW, y1: baseY, x2: sideX + halfBW, y2: baseY, val: vBaseDiag, offset: 25, active: false },
+            { x1: sideX - halfBW, y1: baseY, x2: sideX - halfBW, y2: baseY - bH, val: vBaseH, offset: 25, active: false },
+            { x1: sideX + halfBW, y1: baseY - bH, x2: sideX + halfBW, y2: baseY, val: vBaseH, offset: 25, active: false },
+            { x1: sideX - halfCW, y1: baseY - bH, x2: sideX - halfCW, y2: baseY - bH - cH, val: vCylH, offset: 25, active: false },
+            { x1: sideX + halfCW, y1: baseY - bH - cH, x2: sideX + halfCW, y2: baseY - bH, val: vCylH, offset: 25, active: false },
+            { x1: sideX - halfCW, y1: baseY - bH - cH, x2: sideX + halfCW, y2: baseY - bH - cH, val: vCylD, offset: -25, active: false },
+
+            // Вид сверху
+            { x1: frontX, y1: topY - halfBW, x2: frontX - halfBW, y2: topY, val: vBaseSide, offset: 25, active: false },
+            { x1: frontX + halfBW, y1: topY, x2: frontX, y2: topY - halfBW, val: vBaseSide, offset: 25, active: false },
+            { x1: frontX - halfBW, y1: topY, x2: frontX, y2: topY + halfBW, val: vBaseSide, offset: 25, active: false },
+            { x1: frontX, y1: topY + halfBW, x2: frontX + halfBW, y2: topY, val: vBaseSide, offset: 25, active: false }
+        ];
+
+        const dimCircle = { cx: frontX, cy: topY, r: halfCW, val: '∅' + vCylD, active: false };
+
+        // Математика: расстояние от точки до отрезка (для точного клика на мобилках)
+        function pointToLineDist(px, py, x1, y1, x2, y2) {
+            const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            if (lenSq !== 0) param = dot / lenSq;
+            let xx, yy;
+            if (param < 0) { xx = x1; yy = y1; }
+            else if (param > 1) { xx = x2; yy = y2; }
+            else { xx = x1 + param * C; yy = y1 + param * D; }
+            return Math.sqrt((px - xx) ** 2 + (py - yy) ** 2);
+        }
+
+        // Отрисовка инженерного размера с выносными линиями
+        function drawEngineeringDim(ctx, x1, y1, x2, y2, text, offsetNorm) {
+            ctx.save();
+            ctx.strokeStyle = '#39ff14'; // Неоновый зеленый цвет для размеров
+            ctx.fillStyle = '#39ff14';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#39ff14';
+
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.hypot(dx, dy);
+            const nx = -dy / len, ny = dx / len;
+
+            const extX1 = x1 + nx * offsetNorm, extY1 = y1 + ny * offsetNorm;
+            const extX2 = x2 + nx * offsetNorm, extY2 = y2 + ny * offsetNorm;
+
+            // Выносные линии
+            ctx.beginPath();
+            ctx.moveTo(x1, y1); ctx.lineTo(extX1, extY1);
+            ctx.moveTo(x2, y2); ctx.lineTo(extX2, extY2);
+            ctx.stroke();
+
+            // Основная размерная линия (немного не доходит до конца выносной)
+            const dimLineOffset = offsetNorm * 0.8;
+            const dimX1 = x1 + nx * dimLineOffset, dimY1 = y1 + ny * dimLineOffset;
+            const dimX2 = x2 + nx * dimLineOffset, dimY2 = y2 + ny * dimLineOffset;
+
+            ctx.beginPath();
+            ctx.moveTo(dimX1, dimY1); ctx.lineTo(dimX2, dimY2);
+            ctx.stroke();
+
+            // Точки-ограничители (минимализм)
+            ctx.beginPath();
+            ctx.arc(dimX1, dimY1, 2.5, 0, Math.PI * 2);
+            ctx.arc(dimX2, dimY2, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Текст
+            ctx.font = '500 16px "Segoe UI"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            const textX = x1 + (dx/2) + nx * (offsetNorm * 1.25);
+            const textY = y1 + (dy/2) + ny * (offsetNorm * 1.25);
+            
+            ctx.fillText(text, textX, textY);
+            ctx.restore();
+        }
+
+        function drawSection3() {
+            ctxDims.clearRect(0, 0, canvasDims.width, canvasDims.height);
+            drawBaseGeometry(ctxDims); // Отрисовываем основу без синих точек
+
+            // Отрисовка размеров для активных линий
+            dimLines.forEach(line => {
+                if (line.active) {
+                    // Подсветка самой линии (эффект свечения при клике)
+                    ctxDims.save();
+                    ctxDims.strokeStyle = '#39ff14';
+                    ctxDims.lineWidth = 3;
+                    ctxDims.shadowBlur = 15;
+                    ctxDims.shadowColor = '#39ff14';
+                    ctxDims.beginPath();
+                    ctxDims.moveTo(line.x1, line.y1);
+                    ctxDims.lineTo(line.x2, line.y2);
+                    ctxDims.stroke();
+                    ctxDims.restore();
+
+                    // Отрисовка выносного размера
+                    drawEngineeringDim(ctxDims, line.x1, line.y1, line.x2, line.y2, line.val, line.offset);
+                }
+            });
+
+            // Отрисовка размера круга
+            if (dimCircle.active) {
+                ctxDims.save();
+                ctxDims.strokeStyle = '#39ff14';
+                ctxDims.fillStyle = '#39ff14';
+                ctxDims.lineWidth = 1.5;
+                ctxDims.shadowBlur = 8;
+                ctxDims.shadowColor = '#39ff14';
+
+                // Подсветка круга
+                ctxDims.beginPath();
+                ctxDims.arc(dimCircle.cx, dimCircle.cy, dimCircle.r, 0, Math.PI * 2);
+                ctxDims.stroke();
+
+                // Линия диаметра
+                const a = Math.PI / 4; // Угол в 45 градусов
+                const dx = Math.cos(a) * dimCircle.r, dy = Math.sin(a) * dimCircle.r;
+                ctxDims.beginPath();
+                ctxDims.moveTo(dimCircle.cx - dx, dimCircle.cy - dy);
+                ctxDims.lineTo(dimCircle.cx + dx + 30, dimCircle.cy + dy + 30); // Вынос
+                ctxDims.stroke();
+
+                // Текст
+                ctxDims.font = '500 16px "Segoe UI"';
+                ctxDims.textAlign = 'left';
+                ctxDims.textBaseline = 'bottom';
+                ctxDims.fillText(dimCircle.val, dimCircle.cx + dx + 35, dimCircle.cy + dy + 25);
+                ctxDims.restore();
+            }
+        }
+
+        drawSection3();
+
+        // Интерактив 3 секции (универсальный тап/клик)
+        canvasDims.addEventListener('click', (e) => {
+            const rect = canvasDims.getBoundingClientRect();
+            const scaleX = canvasDims.width / rect.width;
+            const scaleY = canvasDims.height / rect.height;
+            const mouseX = (e.clientX - rect.left) * scaleX;
+            const mouseY = (e.clientY - rect.top) * scaleY;
+
+            let clicked = false;
+
+            // Проверка попадания в отрезок (хитбокс 20px для удобства пальцем)
+            dimLines.forEach(line => {
+                if (pointToLineDist(mouseX, mouseY, line.x1, line.y1, line.x2, line.y2) < 20) {
+                    line.active = !line.active;
+                    clicked = true;
+                }
+            });
+
+            // Проверка попадания в круг
+            const distToCenter = Math.hypot(mouseX - dimCircle.cx, mouseY - dimCircle.cy);
+            if (Math.abs(distToCenter - dimCircle.r) < 20) {
+                dimCircle.active = !dimCircle.active;
+                clicked = true;
+            }
+
+            if (clicked) drawSection3();
+        });
+
     </script>
 </body>
 </html>
-
-
