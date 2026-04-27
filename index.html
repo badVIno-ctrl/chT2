@@ -144,7 +144,6 @@
 
         <div class="glass-panel">
             <h2>2. Ортогональные проекции</h2>
-            <div class="hint">Кликните в любую точку, чтобы увидеть связи</div>
             <div class="canvas-wrapper">
                 <canvas id="view2d" class="view-canvas" width="800" height="700"></canvas>
             </div>
@@ -152,9 +151,15 @@
 
         <div class="glass-panel">
             <h2>3. Размеры деталей</h2>
-            <div class="hint">Кликните (или тапните) по любой линии, чтобы узнать её длину</div>
             <div class="canvas-wrapper">
                 <canvas id="view2d-dims" class="view-canvas" width="800" height="700"></canvas>
+            </div>
+        </div>
+
+        <div class="glass-panel">
+            <h2>4. Сечение</h2>
+            <div class="canvas-wrapper">
+                <canvas id="view2d-cut" class="view-canvas" width="800" height="700"></canvas>
             </div>
         </div>
     </div>
@@ -779,6 +784,106 @@
 
             if (clicked) drawSection3();
         });
+
+        // --- СЕКЦИЯ 4: Фигура после отсечения ---
+        const canvasCut = document.getElementById('view2d-cut');
+        const ctxCut = canvasCut.getContext('2d');
+
+        // Параметры линии сечения (в внутренних единицах модели)
+        const cutSlope = (y2 - y1) / (x2 - x1);
+        // На уровне верха основания (y = baseHeight) сечение пересекает x:
+        const xCutBaseTop = x1 + (baseHeight - y1) / cutSlope; // ≈ -18.83
+        // y, при котором x_threshold = 0 (граница вертикальной части цилиндра в виде сбоку)
+        const yEllipseStart = y1 + (0 - x1) * cutSlope; // ≈ 48.96
+
+        function drawSection4() {
+            const ctx = ctxCut;
+            ctx.clearRect(0, 0, canvasCut.width, canvasCut.height);
+
+            // Оси
+            ctx.beginPath();
+            ctx.strokeStyle = axisColor;
+            ctx.lineWidth = 1;
+            ctx.moveTo(0, cy); ctx.lineTo(ctx.canvas.width, cy);
+            ctx.moveTo(cx, 0); ctx.lineTo(cx, ctx.canvas.height);
+            ctx.stroke();
+
+            ctx.fillStyle = axisColor;
+            ctx.font = '14px Arial';
+            ctx.fillText('X', 20, cy - 10);
+            ctx.fillText('Z', cx + 10, 20);
+            ctx.fillText('Y', cx + 10, ctx.canvas.height - 20);
+            ctx.fillText('Y', ctx.canvas.width - 20, cy - 10);
+
+            // Контуры остатка фигуры — фиолетовым
+            ctx.strokeStyle = neonColor;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = neonColor;
+
+            // ============ ВИД СПЕРЕДИ (front) ============
+            // Основание-трапеция: левый-низ -> правый-низ -> правый-верх -> (xCutBaseTop, верх) -> наклонный срез -> (-baseHalfDiag, y1) -> закрыть
+            ctx.beginPath();
+            ctx.moveTo(frontX - halfBW, baseY);
+            ctx.lineTo(frontX + halfBW, baseY);
+            ctx.lineTo(frontX + halfBW, baseY - bH);
+            ctx.lineTo(frontX + xCutBaseTop * scale, baseY - bH);
+            ctx.lineTo(frontX + x1 * scale, baseY - y1 * scale);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Цилиндр-треугольник: (xCutBaseTop, верх основания) -> (cylR, верх основания) -> (cylR, y2) -> закрыть наклонным срезом
+            ctx.beginPath();
+            ctx.moveTo(frontX + xCutBaseTop * scale, baseY - bH);
+            ctx.lineTo(frontX + x2 * scale, baseY - bH);
+            ctx.lineTo(frontX + x2 * scale, baseY - y2 * scale);
+            ctx.closePath();
+            ctx.stroke();
+
+            // ============ ВИД СВЕРХУ (top) ============
+            // Полный ромб (контур основания не меняется при проекции)
+            ctx.beginPath();
+            ctx.moveTo(frontX, topY - halfBW);
+            ctx.lineTo(frontX + halfBW, topY);
+            ctx.lineTo(frontX, topY + halfBW);
+            ctx.lineTo(frontX - halfBW, topY);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Сегмент окружности (оставшаяся часть цилиндра): хорда при x = xCutBaseTop, x ≥ xCutBaseTop
+            const chordHalf = Math.sqrt(cylRadius * cylRadius - xCutBaseTop * xCutBaseTop);
+            const chordAngle = Math.acos(xCutBaseTop / cylRadius); // угол от +X до точки хорды
+            const xChord = frontX + xCutBaseTop * scale;
+            ctx.beginPath();
+            // дуга от верхней точки хорды (z<0 в модели — выше на canvas) через правую сторону к нижней
+            ctx.arc(frontX, topY, halfCW, -chordAngle, chordAngle, false);
+            // замыкаем хордой
+            ctx.lineTo(xChord, topY - chordHalf * scale);
+            ctx.stroke();
+
+            // ============ ВИД СБОКУ (side) ============
+            // Полное основание (прямоугольник остаётся целиком в проекции)
+            ctx.strokeRect(sideX - halfBW, baseY - bH, bW, bH);
+
+            // Цилиндр после среза:
+            // — снизу прямоугольник от y=baseHeight до y=yEllipseStart, z ∈ [-cylR, +cylR]
+            // — сверху половина эллипса с центром (z=0, y=yEllipseStart) и полуосями (cylR, y2-yEllipseStart)
+            const yEllStartCanvas = baseY - yEllipseStart * scale;
+            const ellRy = (y2 - yEllipseStart) * scale;
+            ctx.beginPath();
+            // нижний прямоугольник + дуга эллипса в одном контуре
+            ctx.moveTo(sideX - halfCW, baseY - bH);                // низ-лево
+            ctx.lineTo(sideX + halfCW, baseY - bH);                // низ-право
+            ctx.lineTo(sideX + halfCW, yEllStartCanvas);           // вверх по правой стороне до начала эллипса
+            // верхняя половина эллипса от правой точки через верх к левой
+            ctx.ellipse(sideX, yEllStartCanvas, halfCW, ellRy, 0, 0, Math.PI, true);
+            ctx.lineTo(sideX - halfCW, baseY - bH);                // вниз по левой стороне обратно
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+        }
+
+        drawSection4();
 
     </script>
 </body>
